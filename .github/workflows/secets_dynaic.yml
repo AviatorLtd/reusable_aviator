@@ -112,15 +112,7 @@ jobs:
         #          (e.g., for `${{ secrets.MY_SECRET }}`), populating the env for bash
         #          indirect expansion is less guaranteed than the previous 'env: ${{ secrets }}' hack.
         #          Test thoroughly. If it fails, explicit mapping might be needed.
-        env:
-           # Explicitly map *all* secrets defined above into the environment for this step
-           # This is verbose but more reliable than hoping inherit populates the env correctly for bash.
-           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }} # Needed for ignore check maybe?
-           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }} # Needed for ignore check maybe?
-           # Add all other secrets defined in workflow_call.secrets
-           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-           API_KEY: ${{ secrets.API_KEY }}
-           # ... add all others here
+        env: ${{ secrets }}
         run: |
           echo "Starting sync process..."
           names_to_sync="${{ steps.get_names.outputs.names_list }}"
