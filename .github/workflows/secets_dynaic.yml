@@ -1,0 +1,189 @@
+# .github/workflows/reusable-sync-secrets-to-aws.yml
+name: Reusable - Sync Secrets to AWS SM
+
+# --- Define Trigger for Reusable Workflows ---
+on:
+  workflow_call:
+    # --- Define Inputs the Caller Can Provide ---
+    inputs:
+      aws-region:
+        description: 'AWS Region to sync secrets to'
+        required: true
+        type: string
+      secrets-to-ignore:
+        description: 'Space-separated list of GitHub secret names to NOT sync'
+        required: false
+        type: string
+        default: "AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY github_token GITHUB_TOKEN" # Sensible defaults
+      secret-prefix:
+        description: 'Prefix for the secret name in AWS Secrets Manager (e.g., env/repo/branch/). Auto-calculated if empty.'
+        required: false
+        type: string
+        default: '' # Default to empty, will calculate below if needed
+
+    # --- Define Secrets the Reusable Workflow EXPECTS ---
+    # The caller MUST pass these secrets using 'secrets: inherit' or explicit mapping.
+    # IMPORTANT: You MUST list *ALL* secrets here that you intend to sync,
+    # plus the AWS credentials themselves. 'secrets: inherit' only passes secrets
+    # that are explicitly listed here in the called workflow.
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        description: 'AWS Access Key ID for IAM User'
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        description: 'AWS Secret Access Key for IAM User'
+        required: true
+
+jobs:
+  sync_secrets:
+    name: Sync Secrets to AWS SM
+    runs-on: ubuntu-latest
+    # Use inputs and secrets passed by the caller
+    env:
+      AWS_REGION: ${{ inputs.aws-region }}
+      # Note: SECRETS_TO_IGNORE comes from inputs, not env anymore
+      # Note: AWS Credentials come from the secrets context below
+
+    steps:
+      - name: Configure AWS Credentials (IAM User)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }} # Use env var set above
+
+      - name: Step 1 - Get Passed Secret Names
+        id: get_names
+        env:
+          # This now accesses only the secrets explicitly PASSED to this workflow
+          # AND declared in the workflow_call.secrets block above.
+          GITHUB_SECRETS_JSON: ${{ toJSON(secrets) }}
+          SECRETS_TO_IGNORE_INPUT: "${{ inputs.secrets-to-ignore }}" # Get ignore list from input
+        run: |
+          echo "Extracting passed and declared secret names..."
+          names_output=""
+          # Check if the JSON is not empty or just '{}' AND contains more than just AWS keys
+          # (assuming AWS keys themselves shouldn't be synced based on typical ignore lists)
+          potential_names=$(echo "$GITHUB_SECRETS_JSON" | jq -r 'keys | . - ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] | join(" ")')
+
+          if [ -z "$potential_names" ]; then
+            echo "No syncable secrets were passed to this workflow or declared in workflow_call.secrets."
+            echo "names_list=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Potential secrets to sync (before filtering): $potential_names"
+          echo "Secrets to ignore: $SECRETS_TO_IGNORE_INPUT"
+
+          filtered_names=""
+          for name in $potential_names; do
+            # Check if the name is in the ignore list (safer check with spaces)
+            if echo " $SECRETS_TO_IGNORE_INPUT " | grep -q " $name "; then
+              echo "Filtering out: $name (in ignore list)"
+            else
+              # Check if the secret actually has a value (secrets context is non-empty for it)
+              # We access the secret value securely in the next step using indirect expansion
+              # Here we just confirm it's not explicitly empty in the secrets context JSON
+              secret_value_check=$(echo "$GITHUB_SECRETS_JSON" | jq -r --arg k "$name" '.[$k]')
+              if [ -n "$secret_value_check" ]; then
+                 filtered_names="$filtered_names $name"
+              else
+                 echo "Filtering out: $name (value appears empty in secrets context)"
+              fi
+            fi
+          done
+
+          # Trim leading/trailing whitespace
+          names_output=$(echo "$filtered_names" | awk '{$1=$1};1')
+
+          if [ -z "$names_output" ]; then
+             echo "No secrets remaining after filtering."
+          else
+             echo "Secrets to attempt syncing: $names_output"
+          fi
+
+          echo "names_list=${names_output}" >> $GITHUB_OUTPUT
+          echo "Outputting names_list: ${names_output}"
+
+      - name: Step 2 - Sync Secrets to AWS (Applying Ignore List)
+        # WARNING: This step relies on the secrets being available as environment variables
+        #          for the indirect expansion (${!secret_name}) to work.
+        #          While `secrets: inherit` makes them available to the job context
+        #          (e.g., for `${{ secrets.MY_SECRET }}`), populating the env for bash
+        #          indirect expansion is less guaranteed than the previous 'env: ${{ secrets }}' hack.
+        #          Test thoroughly. If it fails, explicit mapping might be needed.
+        env:
+           # Explicitly map *all* secrets defined above into the environment for this step
+           # This is verbose but more reliable than hoping inherit populates the env correctly for bash.
+           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }} # Needed for ignore check maybe?
+           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }} # Needed for ignore check maybe?
+           # Add all other secrets defined in workflow_call.secrets
+           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+           API_KEY: ${{ secrets.API_KEY }}
+           # ... add all others here
+        run: |
+          echo "Starting sync process..."
+          names_to_sync="${{ steps.get_names.outputs.names_list }}"
+
+          if [ -z "$names_to_sync" ]; then
+            echo "No secrets to sync after filtering in Step 1. Exiting."
+            exit 0
+          fi
+
+          # Calculate prefix if not provided
+          secret_prefix="${{ inputs.secret-prefix }}"
+          if [ -z "$secret_prefix" ]; then
+            echo "Calculating default prefix..."
+            # Use GITHUB_ variables available in the context of the *caller* workflow
+            REPO_NAME=$(basename "${{ github.repository }}") # Repository where the caller workflow runs
+            # Get branch/tag name reliably
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              BRANCH_NAME="${{ github.head_ref }}"
+            else
+              BRANCH_NAME=$(echo "${{ github.ref }}" | sed -e "s|refs/heads/||" -e "s|refs/tags/||" -e "s|refs/pull/||")
+            fi
+            secret_prefix="env/${REPO_NAME}/${BRANCH_NAME}/"
+            echo "Calculated prefix: $secret_prefix"
+          else
+             echo "Using provided prefix: $secret_prefix"
+          fi
+
+          echo "Will attempt to sync secrets named: $names_to_sync"
+          echo "Target AWS Region: $AWS_REGION"
+          echo "WARNING: Errors from AWS CLI create/put will be ignored (upsert behavior)!"
+
+          sync_count=0
+          skip_count=0
+          for secret_name in $names_to_sync; do
+            # Get value via BASH indirect expansion. Relies on the 'env:' block above.
+            secret_value="${!secret_name}"
+
+            # This check should ideally be redundant due to filtering in step 1, but keep as safeguard.
+            if [ -z "$secret_value" ]; then
+              echo "Skipping sync for: $secret_name (Value is unexpectedly empty in env)"
+              skip_count=$((skip_count + 1))
+              continue
+            fi
+
+            echo "Attempting sync for: $secret_name to $secret_prefix$secret_name"
+
+            # Upsert: Try create, ignore error (if exists), then try put, ignore error.
+            # Added error checking/logging for clarity
+            if aws secretsmanager create-secret --name "$secret_prefix$secret_name" --secret-string "$secret_value" --region "$AWS_REGION"; then
+              echo "Successfully created secret: $secret_prefix$secret_name"
+              sync_count=$((sync_count + 1))
+            else
+              # If create failed (likely because it exists), try updating
+              echo "Secret $secret_prefix$secret_name might already exist. Attempting update..."
+              if aws secretsmanager put-secret-value --secret-id "$secret_prefix$secret_name" --secret-string "$secret_value" --region "$AWS_REGION"; then
+                 echo "Successfully updated secret: $secret_prefix$secret_name"
+                 sync_count=$((sync_count + 1))
+              else
+                 echo "ERROR: Failed to create or update secret: $secret_prefix$secret_name. Check AWS permissions and logs."
+                 skip_count=$((skip_count + 1))
+                 # Consider failing the job here if needed: exit 1
+              fi
+            fi
+          done
+
+          echo "Sync attempt finished. Synced: $sync_count, Skipped/Failed: $skip_count. Check AWS Secrets Manager."
