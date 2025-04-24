@@ -1,10 +1,7 @@
-# .github/workflows/reusable-sync-secrets-to-aws.yml
 name: Reusable - Sync Secrets to AWS SM
 
-# --- Define Trigger for Reusable Workflows ---
 on:
   workflow_call:
-    # --- Define Inputs the Caller Can Provide ---
     inputs:
       aws-region:
         description: 'AWS Region to sync secrets to'
@@ -14,18 +11,12 @@ on:
         description: 'Space-separated list of GitHub secret names to NOT sync'
         required: false
         type: string
-        default: "AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY github_token GITHUB_TOKEN" # Sensible defaults
+        default: "AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY github_token GITHUB_TOKEN"
       secret-prefix:
         description: 'Prefix for the secret name in AWS Secrets Manager (e.g., env/repo/branch/). Auto-calculated if empty.'
         required: false
         type: string
         default: '' # Default to empty, will calculate below if needed
-
-    # --- Define Secrets the Reusable Workflow EXPECTS ---
-    # The caller MUST pass these secrets using 'secrets: inherit' or explicit mapping.
-    # IMPORTANT: You MUST list *ALL* secrets here that you intend to sync,
-    # plus the AWS credentials themselves. 'secrets: inherit' only passes secrets
-    # that are explicitly listed here in the called workflow.
     secrets:
       AWS_ACCESS_KEY_ID:
         description: 'AWS Access Key ID for IAM User'
@@ -38,11 +29,8 @@ jobs:
   sync_secrets:
     name: Sync Secrets to AWS SM
     runs-on: ubuntu-latest
-    # Use inputs and secrets passed by the caller
     env:
       AWS_REGION: ${{ inputs.aws-region }}
-      # Note: SECRETS_TO_IGNORE comes from inputs, not env anymore
-      # Note: AWS Credentials come from the secrets context below
 
     steps:
       - name: Configure AWS Credentials (IAM User)
@@ -50,13 +38,11 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }} # Use env var set above
+          aws-region: ${{ env.AWS_REGION }} 
 
       - name: Step 1 - Get Passed Secret Names
         id: get_names
         env:
-          # This now accesses only the secrets explicitly PASSED to this workflow
-          # AND declared in the workflow_call.secrets block above.
           GITHUB_SECRETS_JSON: ${{ toJSON(secrets) }}
           SECRETS_TO_IGNORE_INPUT: "${{ inputs.secrets-to-ignore }}" # Get ignore list from input
         run: |
@@ -105,13 +91,7 @@ jobs:
           echo "names_list=${names_output}" >> $GITHUB_OUTPUT
           echo "Outputting names_list: ${names_output}"
 
-      - name: Step 2 - Sync Secrets to AWS (Applying Ignore List)
-        # WARNING: This step relies on the secrets being available as environment variables
-        #          for the indirect expansion (${!secret_name}) to work.
-        #          While `secrets: inherit` makes them available to the job context
-        #          (e.g., for `${{ secrets.MY_SECRET }}`), populating the env for bash
-        #          indirect expansion is less guaranteed than the previous 'env: ${{ secrets }}' hack.
-        #          Test thoroughly. If it fails, explicit mapping might be needed.
+      - name: Step 2 - Sync Secrets to AWS
         env: ${{ secrets }}
         run: |
           echo "Starting sync process..."
