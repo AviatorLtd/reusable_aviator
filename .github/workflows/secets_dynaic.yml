@@ -102,23 +102,24 @@ jobs:
           VARS_JSON_FOR_LOOP: ${{ inputs.caller_variables_json }}
         shell: bash
         run: |
-          echo "--- Looping over variables defined in settings ---"
+          echo "--- Looping over variables defined in settings (using JSON parsing) ---"
 
           # Check if JSON is empty
           if [[ -z "$VARS_JSON_FOR_LOOP" || "$VARS_JSON_FOR_LOOP" == "{}" ]]; then
-            echo "No variables to loop over."
+            echo "No variables received via input or JSON is empty."
             exit 0
           fi
 
-          # Option A: Loop using keys and access env var (relies on Step 1 working)
-          echo "Looping Method A (using keys and reading env var):"
-          echo "$VARS_JSON_FOR_LOOP" | jq -r 'keys[]' | while IFS= read -r key; do
-            # Access the value using indirect expansion `${!key}`
-            # This reads the environment variable set by the previous step
-            value="${!key}"
-            echo "  Key: $key, Value: $value"
-            # Add your processing logic here, e.g.:
-            # if [[ "$key" == "DEPLOY_TARGET" ]]; then ... fi
+          # USE THIS METHOD (Option B from previous examples):
+          # Loop using key/value pairs directly from the JSON input
+          echo "Looping Method B (parsing key/value from JSON):"
+          echo "$VARS_JSON_FOR_LOOP" | jq -c 'to_entries[]' | while IFS= read -r entry; do
+              # Parse key and value directly from the JSON entry for this iteration
+              key=$(echo "$entry" | jq -r '.key')
+              value=$(echo "$entry" | jq -r '.value')
+              # NOW $value will contain the correct value from the JSON
+              echo "  Key: $key, Value: $value"
+              # Add your processing logic here using $key and $value
           done
 
           echo "--------------------------------------------------"
