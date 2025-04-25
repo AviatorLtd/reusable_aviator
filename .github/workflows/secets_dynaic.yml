@@ -102,27 +102,83 @@ jobs:
           VARS_JSON_FOR_LOOP: ${{ inputs.caller_variables_json }}
         shell: bash
         run: |
-          echo "--- Looping over variables defined in settings (using JSON parsing) ---"
-
           # Check if JSON is empty
           if [[ -z "$VARS_JSON_FOR_LOOP" || "$VARS_JSON_FOR_LOOP" == "{}" ]]; then
             echo "No variables received via input or JSON is empty."
             exit 0
           fi
+          secret_prefix="${{ inputs.secret-prefix }}"
+          if [ -z "$secret_prefix" ]; then
+            echo "Calculating default prefix..."
+            # Use GITHUB_ variables available in the context of the *caller* workflow
+            REPO_NAME=$(basename "${{ github.repository }}") # Repository where the caller workflow runs
+            # Get branch/tag name reliably
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              BRANCH_NAME="${{ github.head_ref }}"
+            else
+              BRANCH_NAME=$(echo "${{ github.ref }}" | sed -e "s|refs/heads/||" -e "s|refs/tags/||" -e "s|refs/pull/||")
+            fi
+            secret_prefix="env/${REPO_NAME}/${BRANCH_NAME}/"
+            echo "Calculated prefix: $secret_prefix"
+          else
+             echo "Using provided prefix: $secret_prefix"
+          fi
 
-          # USE THIS METHOD (Option B from previous examples):
-          # Loop using key/value pairs directly from the JSON input
-          echo "Looping Method B (parsing key/value from JSON):"
+          echo "Starting VARIABLE sync process..."
+
+          echo "Using Prefix: $secret_prefix"
+          echo "Target AWS Region: $AWS_REGION"
+          echo "WARNING: Errors from AWS CLI create/put will be treated as 'already exists' for updates."
+
+          sync_count=0
+          skip_count=0
+
+          # Use jq to parse the JSON string and loop through each key-value pair
           echo "$VARS_JSON_FOR_LOOP" | jq -c 'to_entries[]' | while IFS= read -r entry; do
-              # Parse key and value directly from the JSON entry for this iteration
-              key=$(echo "$entry" | jq -r '.key')
-              value=$(echo "$entry" | jq -r '.value')
-              # NOW $value will contain the correct value from the JSON
-              echo "  Key: $key, Value: $value"
-              # Add your processing logic here using $key and $value
-          done
+            # Extract the variable name (key) and value directly from the JSON entry
+            var_name=$(echo "$entry" | jq -r '.key')
+            var_value=$(echo "$entry" | jq -r '.value')
 
-          echo "--------------------------------------------------"
+            # Basic check if extraction worked (jq should handle JSON types)
+            if [ -z "$var_name" ]; then
+              echo "Skipping sync for an entry with an empty name."
+              skip_count=$((skip_count + 1))
+              continue
+            fi
+            # Note: var_value can legitimately be empty, so we usually don't skip for that unless intended.
+
+            # Construct the full secret name in AWS Secrets Manager
+            aws_secret_name="${secret_prefix}${var_name}"
+
+            echo "Attempting sync for VARIABLE: $var_name to $aws_secret_name"
+
+            # Upsert logic: Try create, if fails (likely exists), try put.
+            if aws secretsmanager create-secret --name "$aws_secret_name" --secret-string "$var_value" --region "$AWS_REGION"; then
+              echo "Successfully created secret from VARIABLE: $aws_secret_name"
+              sync_count=$((sync_count + 1))
+            else
+              # If create failed (exit code != 0), assume it exists and try updating
+              echo "Secret from VARIABLE $aws_secret_name might already exist. Attempting update..."
+              if aws secretsmanager put-secret-value --secret-id "$aws_secret_name" --secret-string "$var_value" --region "$AWS_REGION"; then
+                echo "Successfully updated secret from VARIABLE: $aws_secret_name"
+                sync_count=$((sync_count + 1))
+              else
+                # If put also fails, log an error
+                echo "ERROR: Failed to create or update secret from VARIABLE: $aws_secret_name. Check AWS permissions and logs."
+                skip_count=$((skip_count + 1))
+                # Consider adding 'exit 1' here if failure for any variable should stop the workflow
+              fi
+            fi
+          done # End of while loop processing JSON entries
+
+          echo "VARIABLE sync finished. Synced: $sync_count, Skipped/Failed: $skip_count. Check AWS Secrets Manager."
+
+          # Optional: Exit with error if any skips/failures occurred
+          # if [ "$skip_count" -gt 0 ]; then
+          #   echo "There were $skip_count skipped or failed variable sync operations."
+          #   # exit 1 # Uncomment to fail the step if needed
+          # fi
+
 
       - name: Sync Secrets to AWS
         env: ${{ secrets }}
@@ -147,7 +203,7 @@ jobs:
             else
               BRANCH_NAME=$(echo "${{ github.ref }}" | sed -e "s|refs/heads/||" -e "s|refs/tags/||" -e "s|refs/pull/||")
             fi
-            secret_prefix="env/${REPO_NAME}/${BRANCH_NAME}/"
+            secret_prefix="secret/${REPO_NAME}/${BRANCH_NAME}/"
             echo "Calculated prefix: $secret_prefix"
           else
              echo "Using provided prefix: $secret_prefix"
