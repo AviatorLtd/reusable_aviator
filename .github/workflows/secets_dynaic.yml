@@ -17,6 +17,12 @@ on:
         required: false
         type: string
         default: '' # Default to empty, will calculate below if needed
+      caller_variables_json:
+        description: 'A JSON string containing variables from the calling workflow vars context'
+        required: false # Or true, depending on if you always expect variables
+        type: string
+        default: '{}' # Default to empty JSON object if not provided
+  
     secrets:
       AWS_ACCESS_KEY_ID:
         description: 'AWS Access Key ID for IAM User'
@@ -93,7 +99,7 @@ jobs:
 
       - name: Loop Over Injected Variables
         env:
-          VARS_JSON_FOR_LOOP: ${{ toJSON(vars) }}
+          VARS_JSON_FOR_LOOP: ${{ inputs.caller_variables_json }}
         shell: bash
         run: |
           echo "--- Looping over variables defined in settings ---"
@@ -117,7 +123,7 @@ jobs:
 
           echo "--------------------------------------------------"
 
-      - name: Step 2 - Sync Secrets to AWS
+      - name: Sync Secrets to AWS
         env: ${{ secrets }}
         run: |
           echo "Starting sync process..."
