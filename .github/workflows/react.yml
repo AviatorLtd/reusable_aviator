@@ -101,9 +101,9 @@ jobs:
             if [[ "$key" == "AWS_ACCESS_KEY_ID" || "$key" == "AWS_SECRET_ACCESS_KEY" ]]; then
                continue
             fi
-            if [[ -z "$value" || "$value" == '***' ]]; then
-                continue
-            fi
+            # if [[ -z "$value" || "$value" == '***' ]]; then
+            #     continue
+            # fi
 
             # --- Add to .env ---
             echo "Adding variable to .env: $key"
