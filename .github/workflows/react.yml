@@ -77,6 +77,13 @@ jobs:
       - name: Create .env file
         env: ${{ secrets }}
         run: |
+          # --- START DEBUG: Print all available environment variable keys ---
+          echo "--- Debug: All Environment Variable Keys Available in Step ---"
+          # Use 'env' to list all vars, 'cut' to get only the key part before '=', and 'sort' for readability
+          env | cut -d '=' -f 1 | sort
+          echo "--- End Debug ---"
+          # --- END DEBUG ---
+
           echo "Generating .env file from inherited secrets..."
           SECRETS_TO_IGNORE_LIST=" ${{ inputs.secrets_to_ignore }} "
           ENV_FILE=".env"
@@ -99,12 +106,7 @@ jobs:
             fi
 
             # --- Add to .env ---
-            # If all filters passed, add the key-value pair to the .env file
-
-            # *** ADDED ECHO STATEMENT HERE ***
             echo "Adding variable to .env: $key"
-
-            # Properly quote the value to handle spaces and special characters
             printf '%s="%s"\n' "$key" "$value" >> "$ENV_FILE"
             added_count=$((added_count + 1))
 
