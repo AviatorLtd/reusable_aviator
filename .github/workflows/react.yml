@@ -152,7 +152,7 @@ jobs:
       # Step 7: Deploy static files to S3 bucket
       - name: Deploy static site to S3 bucket
         run: |
-          ls
+          ls dist
           echo "Preparing deployment..."
           echo "Using build output directory: ${{ inputs.build_output_dir }}"
           BRANCH_NAME=$(echo "${{ inputs.branch_name }}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g')
