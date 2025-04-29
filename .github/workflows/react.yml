@@ -40,17 +40,13 @@ on:
         required: false
         type: string
         default: 'npm run build'
-      # --- NEW INPUT --- (Mimicking secrets sync workflow)
       secrets_to_ignore:
         description: 'Space-separated list of GitHub secret names to NOT include in the .env file'
         required: false
         type: string
-        # Default ignores common infrastructure/action-related secrets
         default: "AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY GITHUB_TOKEN github_token"
 
     # --- Secrets ---
-    # Secrets explicitly required by THIS workflow (e.g., for AWS actions)
-    # The caller should pass these using `secrets: inherit` or direct mapping.
     secrets:
       AWS_ACCESS_KEY_ID:
         description: 'AWS Access Key ID for S3 deployment'
@@ -58,8 +54,6 @@ on:
       AWS_SECRET_ACCESS_KEY:
         description: 'AWS Secret Access Key for S3 deployment'
         required: true
-      # NOTE: Secrets intended for the .env file are NOT declared here.
-      # They are expected to be inherited and accessed via the environment in the "Create .env file" step.
 
 # --- Jobs ---
 jobs:
@@ -79,52 +73,37 @@ jobs:
           node-version: ${{ inputs.node_version }}
           cache: 'npm'
 
-      # --- NEW STEP ---
       # Step 3: Create .env file from inherited secrets (using env + filtering)
       - name: Create .env file
-        # This step attempts to access all inherited secrets via the environment
         env: ${{ secrets }}
         run: |
           echo "Generating .env file from inherited secrets..."
-          # Add spaces around ignore list items for accurate word matching
           SECRETS_TO_IGNORE_LIST=" ${{ inputs.secrets_to_ignore }} "
           ENV_FILE=".env"
           > "$ENV_FILE" # Create or truncate the .env file
           added_count=0
 
-          # Iterate through all environment variables provided by `env: ${{ secrets }}`
-          # Use 'env' command as a reliable way to list environment variables
           env | while IFS='=' read -r key value; do
             # --- Filtering Logic ---
-
-            # Filter 1: Check against the ignore list
             if echo "$SECRETS_TO_IGNORE_LIST" | grep -q " $key "; then
-              # echo "DEBUG: Ignoring '$key' (in secrets_to_ignore list)."
               continue
             fi
-
-            # Filter 2: Check against common system/GitHub Actions variables (adjust as needed)
-            # Using extended regex for efficiency
             if [[ "$key" =~ ^(HOME|PATH|PWD|USER|CI|RUNNER_|GITHUB_|ACTIONS_|INPUT_|AWS_REGION|AWS_DEFAULT_REGION|NODE_VERSION)$ ]]; then
-              # echo "DEBUG: Ignoring '$key' (system/actions var)."
               continue
             fi
-
-            # Filter 3: Explicitly ignore AWS keys again (belt-and-suspenders)
             if [[ "$key" == "AWS_ACCESS_KEY_ID" || "$key" == "AWS_SECRET_ACCESS_KEY" ]]; then
-               # echo "DEBUG: Ignoring '$key' (explicit AWS key)."
                continue
             fi
-
-            # Filter 4: Skip if value is empty or the placeholder '***'
-            # GitHub Actions might pass secrets without values as '***' or empty
             if [[ -z "$value" || "$value" == '***' ]]; then
-                # echo "DEBUG: Ignoring '$key' (value is empty or '***')."
                 continue
             fi
 
             # --- Add to .env ---
             # If all filters passed, add the key-value pair to the .env file
+
+            # *** ADDED ECHO STATEMENT HERE ***
+            echo "Adding variable to .env: $key"
+
             # Properly quote the value to handle spaces and special characters
             printf '%s="%s"\n' "$key" "$value" >> "$ENV_FILE"
             added_count=$((added_count + 1))
@@ -134,23 +113,20 @@ jobs:
           echo "Finished generating .env file. Added $added_count variables."
           if [ "$added_count" -gt 0 ]; then
             echo "Generated .env content (sensitive values masked):"
-            # Mask common sensitive keys before printing to log
             cat "$ENV_FILE" | sed -E 's/(PASSWORD|API_KEY|SECRET|TOKEN)=.*/\1=****/'
           else
             echo "No variables added to .env file after filtering."
           fi
 
-      # Step 4: Install project dependencies (was Step 3)
+      # Step 4: Install project dependencies
       - name: Install dependencies
         run: ${{ inputs.install_command }}
 
-      # Step 5: Build the React application (was Step 4)
-      # The build process should automatically pick up the generated .env file
+      # Step 5: Build the React application
       - name: Build React application
         run: ${{ inputs.build_command }}
 
-      # Step 6: Configure AWS Credentials (was Step 5)
-      # Uses the explicitly declared/passed secrets
+      # Step 6: Configure AWS Credentials
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -158,22 +134,19 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ inputs.aws_region }}
 
-      # Step 7: Deploy static files to dynamically named S3 bucket (was Step 6)
+      # Step 7: Deploy static files to S3 bucket
       - name: Deploy static site to S3 bucket
         run: |
           echo "Preparing deployment..."
           echo "Using build output directory: ${{ inputs.build_output_dir }}"
-          # --- Construct the dynamic S3 bucket name ---
           BRANCH_NAME=$(echo "${{ inputs.branch_name }}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g')
           REPO_NAME_LOWER=$(echo "${{ inputs.repo_name }}" | tr '[:upper:]' '[:lower:]')
           REGION_LOWER=$(echo "${{ inputs.aws_region }}" | tr '[:upper:]' '[:lower:]')
           BUCKET_NAME="${BRANCH_NAME}-${REPO_NAME_LOWER}-${REGION_LOWER}-static-s3"
           echo "Target S3 Bucket: s3://${BUCKET_NAME}"
-          # --- Validate build directory exists ---
           if [ ! -d "${{ inputs.build_output_dir }}" ]; then
             echo "Error: Build output directory '${{ inputs.build_output_dir }}' not found!"
             exit 1
           fi
-          # --- Sync files to the constructed bucket name ---
           aws s3 sync ${{ inputs.build_output_dir }} "s3://${BUCKET_NAME}" --delete
           echo "Deployment to s3://${BUCKET_NAME} completed."
