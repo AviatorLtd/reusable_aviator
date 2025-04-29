@@ -103,11 +103,11 @@ jobs:
               continue
             fi
 
-            # # Filter 2: Check against common system/GitHub Actions variables (Still Commented Out)
-            # if [[ "$key" =~ ^(HOME|PATH|PWD|USER|CI|RUNNER_|GITHUB_|ACTIONS_|INPUT_|AWS_REGION|AWS_DEFAULT_REGION|NODE_VERSION)$ ]]; then
-            #   echo "DEBUG Action: Ignored '$key' via Filter 2 (System/Actions Var)" # Specify reason
-            #   continue
-            # fi
+            # Filter 2: Check against common system/GitHub Actions variables (Still Commented Out)
+            if [[ "$key" =~ ^(HOME|PATH|PWD|USER|CI|RUNNER_|GITHUB_|ACTIONS_|INPUT_|AWS_REGION|AWS_DEFAULT_REGION|NODE_VERSION)$ ]]; then
+              echo "DEBUG Action: Ignored '$key' via Filter 2 (System/Actions Var)" # Specify reason
+              continue
+            fi
 
             # Filter 3: Explicitly ignore AWS keys again
             if [[ "$key" == "AWS_ACCESS_KEY_ID" || "$key" == "AWS_SECRET_ACCESS_KEY" ]]; then
