@@ -79,7 +79,6 @@ jobs:
         run: |
           # --- START DEBUG: Print all available environment variable keys ---
           echo "--- Debug: All Environment Variable Keys Available in Step ---"
-          # Use 'env' to list all vars, 'cut' to get only the key part before '=', and 'sort' for readability
           env | cut -d '=' -f 1 | sort
           echo "--- End Debug ---"
           # --- END DEBUG ---
@@ -92,21 +91,36 @@ jobs:
 
           env | while IFS='=' read -r key value; do
             # --- Filtering Logic ---
+
+            # Filter 1: Check against the ignore list
             if echo "$SECRETS_TO_IGNORE_LIST" | grep -q " $key "; then
+              # echo "DEBUG: Ignoring '$key' (Filter 1: In secrets_to_ignore list)."
               continue
             fi
+
+            # Filter 2: Check against common system/GitHub Actions variables
             if [[ "$key" =~ ^(HOME|PATH|PWD|USER|CI|RUNNER_|GITHUB_|ACTIONS_|INPUT_|AWS_REGION|AWS_DEFAULT_REGION|NODE_VERSION)$ ]]; then
+              # echo "DEBUG: Ignoring '$key' (Filter 2: System/Actions variable)."
               continue
             fi
+
+            # Filter 3: Explicitly ignore AWS keys again
             if [[ "$key" == "AWS_ACCESS_KEY_ID" || "$key" == "AWS_SECRET_ACCESS_KEY" ]]; then
+               # echo "DEBUG: Ignoring '$key' (Filter 3: Explicit AWS key)."
                continue
             fi
+
+            # --- FILTER 4 REMOVED ---
+            # This filter previously skipped variables with empty values or values exactly equal to '***'
+            # Removing it allows these variables (like TEST_SECRET if its value was empty/'***') to be included.
             # if [[ -z "$value" || "$value" == '***' ]]; then
+            #     # echo "DEBUG: Ignoring '$key' (Filter 4: Value is empty or '***')."
             #     continue
             # fi
+            # --- END OF REMOVED FILTER 4 ---
 
             # --- Add to .env ---
-            echo "Adding variable to .env: $key"
+            echo "Adding variable to .env: $key" # Log which variable is being added
             printf '%s="%s"\n' "$key" "$value" >> "$ENV_FILE"
             added_count=$((added_count + 1))
 
