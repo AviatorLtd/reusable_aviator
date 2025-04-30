@@ -165,14 +165,14 @@ jobs:
           # Be cautious logging .env contents if they are sensitive
           cat .env        # Step 4: Install project dependencies
           pwd
-          ls
+          ls -al
       - name: Install dependencies
         run: ${{ inputs.install_command }}
 
       # Step 5: Build the React application
       - name: Build React application
         run: |
-          ls
+          ls -al
           ${{ inputs.build_command }}
 
       # Step 6: Configure AWS Credentials
