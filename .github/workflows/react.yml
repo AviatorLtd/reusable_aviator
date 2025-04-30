@@ -169,7 +169,9 @@ jobs:
 
       # Step 5: Build the React application
       - name: Build React application
-        run: ${{ inputs.build_command }}
+        run: |
+          ls
+          ${{ inputs.build_command }}
 
       # Step 6: Configure AWS Credentials
       - name: Configure AWS Credentials
@@ -182,7 +184,6 @@ jobs:
       # Step 7: Deploy static files to S3 bucket
       - name: Deploy static site to S3 bucket
         run: |
-          ls
           echo "Preparing deployment..."
           echo "Using build output directory: ${{ inputs.build_output_dir }}"
           BRANCH_NAME=$(echo "${{ inputs.branch_name }}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g')
