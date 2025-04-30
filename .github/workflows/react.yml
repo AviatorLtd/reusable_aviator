@@ -164,6 +164,8 @@ jobs:
           echo "Contents of .env:"
           # Be cautious logging .env contents if they are sensitive
           cat .env        # Step 4: Install project dependencies
+          pwd
+          ls
       - name: Install dependencies
         run: ${{ inputs.install_command }}
 
