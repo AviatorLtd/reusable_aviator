@@ -133,6 +133,8 @@ jobs:
           else
             echo "No variables added to .env file after filtering."
           fi
+          pwd
+          ls
       # Step 4: Install project dependencies
       - name: Install dependencies
         run: ${{ inputs.install_command }}
