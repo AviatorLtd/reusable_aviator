@@ -100,16 +100,25 @@ jobs:
           echo "names_list=${names_output}" >> $GITHUB_OUTPUT
           echo "Outputting names_list: ${names_output}" # Log the names being passed
 
-      - name: Step 2 - Write Secrets to .env File
+      - name: Step 2 - Write Secrets to .env File (Applying Ignore List)
         # Populate the step's environment with all secrets.
         # WARNING: This relies on potentially undocumented or unstable behavior.
-        # Secrets might not be exposed this way in future GitHub Actions versions.
-        # Consider alternative methods if this breaks.
         env: ${{ secrets }}
+        # Pass the input ignore list as an environment variable to the script
+        # Use inputs context for workflow_dispatch/workflow_call
+        # If not using inputs, you might define this at the job level:
+        # env:
+        #   SECRETS_TO_IGNORE: "SOME_SECRET ANOTHER_SECRET" # Example hardcoded list
+        #   ${{ secrets }} # Still need this to populate other secrets
         run: |
           echo "Starting process to write secrets to .env file..."
           # Get the list of secret names from the previous step's output.
           names_to_write="${{ steps.get_names.outputs.names_list }}"
+          # Get the ignore list from the input (passed via env var for script access)
+          ignore_list="${{ inputs.secrets_to_ignore }}" # Access the input directly
+
+          echo "Secrets to potentially write: $names_to_write"
+          echo "Secrets to ignore: $ignore_list"
 
           # Check if any names were actually passed from Step 1.
           if [ -z "$names_to_write" ]; then
@@ -117,39 +126,44 @@ jobs:
             exit 0 # Exit successfully as there's nothing to write
           fi
 
-          echo "Will attempt to write the following secrets to .env: $names_to_write"
-
           # Ensure the .env file is empty before starting
           > .env
           echo "Created/Cleared .env file."
 
           # Loop through each secret name obtained from Step 1.
           for secret_name in $names_to_write; do
+
+            # --- Ignore List Check ---
+            # Check if the ignore list is not empty AND if the current secret_name exists within it.
+            # We pad both the list and the name with spaces for safer whole-word matching.
+            # grep -q returns 0 (success/true in shell terms) if found.
+            if [ -n "$ignore_list" ] && echo " $ignore_list " | grep -q " $secret_name "; then
+              echo "Skipping: $secret_name (found in ignore list)"
+              continue # Skip to the next secret name in the loop
+            fi
+            # --- End Ignore List Check ---
+
             # Use BASH indirect expansion (!variable_name) to get the value
             # of the environment variable whose name is stored in 'secret_name'.
-            # This works because 'env: ${{ secrets }}' populated the environment.
             secret_value="${!secret_name}"
 
             # Check if the secret value is actually empty or if the environment variable
-            # for this secret name wasn't populated (e.g., due to limitations).
+            # for this secret name wasn't populated.
             if [ -z "$secret_value" ]; then
-              echo "Skipping: $secret_name (Value is empty OR env var not populated)"
-              continue # Skip to the next secret name in the loop
+                echo "Skipping: $secret_name (Value is empty OR env var not populated)"
+                continue # Skip to the next secret name in the loop
             fi
 
             echo "Writing $secret_name to .env file..."
             # Append the secret name and its value to the .env file.
-            # Ensure proper quoting if values might contain special characters, though
-            # .env format usually doesn't require quotes unless values have spaces/newlines.
-            # For simplicity, we're not adding quotes here. Adjust if needed.
             echo "${secret_name}=${secret_value}" >> .env
 
           done
 
           echo ".env file generation complete."
-          cat .env
           echo "Contents of .env:"
-        # Step 4: Install project dependencies
+          # Be cautious logging .env contents if they are sensitive
+          cat .env        # Step 4: Install project dependencies
       - name: Install dependencies
         run: ${{ inputs.install_command }}
 
