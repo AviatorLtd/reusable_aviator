@@ -147,6 +147,7 @@ jobs:
           done
 
           echo ".env file generation complete."
+          cat .env
           echo "Contents of .env:"
         # Step 4: Install project dependencies
       - name: Install dependencies
