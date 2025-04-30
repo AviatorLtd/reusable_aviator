@@ -75,67 +75,80 @@ jobs:
 
       # Step 3: Create .env file from inherited secrets (using env + filtering)
 # Step 3: Create .env file from inherited secrets (using env + filtering)
-      - name: Create .env file
+      - name: Step 1 - Get All Secret Names
+        id: get_names
+        # Use the toJSON context function to get all secrets as a JSON string.
+        # This is stored in an environment variable GITHUB_SECRETS_JSON.
+        env:
+          GITHUB_SECRETS_JSON: ${{ toJSON(secrets) }}
+        run: |
+          echo "Extracting all available secret names..."
+          names_output="" # Default to empty string
+
+          # Check if the secrets JSON is not empty or just '{}'
+          if [ -n "$GITHUB_SECRETS_JSON" ] && [ "$GITHUB_SECRETS_JSON" != "{}" ]; then
+            # Use jq (a lightweight JSON processor) to extract the keys (secret names)
+            # and join them into a single space-separated string.
+            # The '-r' flag outputs raw strings without quotes.
+            names_output=$(echo "$GITHUB_SECRETS_JSON" | jq -r 'keys | join(" ")')
+            echo "Found secret names."
+          else
+            echo "No secrets found or secrets context is empty."
+          fi
+
+          # Set the output variable 'names_list' for the next step using GitHub Actions output syntax.
+          echo "names_list=${names_output}" >> $GITHUB_OUTPUT
+          echo "Outputting names_list: ${names_output}" # Log the names being passed
+
+      - name: Step 2 - Write Secrets to .env File
+        # Populate the step's environment with all secrets.
+        # WARNING: This relies on potentially undocumented or unstable behavior.
+        # Secrets might not be exposed this way in future GitHub Actions versions.
+        # Consider alternative methods if this breaks.
         env: ${{ secrets }}
         run: |
-          # --- START DEBUG: Print all available environment variables ---
-          echo "--- Debug: All Environment Variables Available in Step (Sorted Key=Value) ---"
-          # Show KEY=value pairs, sorted, to see the raw values
-          env | sort
-          echo "--- End Debug ---"
-          # --- END DEBUG ---
+          echo "Starting process to write secrets to .env file..."
+          # Get the list of secret names from the previous step's output.
+          names_to_write="${{ steps.get_names.outputs.names_list }}"
 
-          echo "Generating .env file from inherited secrets..."
-          SECRETS_TO_IGNORE_LIST=" ${{ inputs.secrets_to_ignore }} "
-          ENV_FILE=".env"
-          > "$ENV_FILE" # Create or truncate the .env file
-          added_count=0
-
-          env | while IFS='=' read -r key value; do
-            # --- ADDED DEBUG: Show exactly what the loop read ---
-            echo "Loop Processing Line: Key='${key}' Value='${value}'"
-
-            # --- Filtering Logic ---
-
-            # Filter 1: Check against the ignore list
-            if echo "$SECRETS_TO_IGNORE_LIST" | grep -q " $key "; then
-              echo "DEBUG Action: Ignored '$key' via Filter 1 (Ignore List)" # Specify reason
-              continue
-            fi
-
-            # Filter 2: Check against common system/GitHub Actions variables (Still Commented Out)
-            if [[ "$key" =~ ^(HOME|PATH|PWD|USER|CI|RUNNER_|GITHUB_|ACTIONS_|INPUT_|AWS_REGION|AWS_DEFAULT_REGION|NODE_VERSION)$ ]]; then
-              echo "DEBUG Action: Ignored '$key' via Filter 2 (System/Actions Var)" # Specify reason
-              continue
-            fi
-
-            # Filter 3: Explicitly ignore AWS keys again
-            if [[ "$key" == "AWS_ACCESS_KEY_ID" || "$key" == "AWS_SECRET_ACCESS_KEY" ]]; then
-              echo "DEBUG Action: Ignored '$key' via Filter 3 (AWS Key)" # Specify reason
-              continue
-            fi
-
-            # Filter 4: (Removed)
-
-            # --- Add to .env ---
-            # This line should now execute for TEST_SECRET if it reaches here
-            echo "DEBUG Action: Adding variable to .env: $key" # Log action
-            printf '%s="%s"\n' "$key" "$value" >> "$ENV_FILE"
-            added_count=$((added_count + 1))
-
-          done # End of while loop
-
-          echo "Finished generating .env file. Added $added_count variables."
-          cat ".env"
-          if [ "$added_count" -gt 0 ]; then
-            echo "Generated .env content (sensitive values masked):"
-            cat "$ENV_FILE" | sed -E 's/(PASSWORD|API_KEY|SECRET|TOKEN)=.*/\1=****/'
-          else
-            echo "No variables added to .env file after filtering."
+          # Check if any names were actually passed from Step 1.
+          if [ -z "$names_to_write" ]; then
+            echo "No secret names found in the previous step. Skipping .env file creation."
+            exit 0 # Exit successfully as there's nothing to write
           fi
-          pwd
-          ls
-      # Step 4: Install project dependencies
+
+          echo "Will attempt to write the following secrets to .env: $names_to_write"
+
+          # Ensure the .env file is empty before starting
+          > .env
+          echo "Created/Cleared .env file."
+
+          # Loop through each secret name obtained from Step 1.
+          for secret_name in $names_to_write; do
+            # Use BASH indirect expansion (!variable_name) to get the value
+            # of the environment variable whose name is stored in 'secret_name'.
+            # This works because 'env: ${{ secrets }}' populated the environment.
+            secret_value="${!secret_name}"
+
+            # Check if the secret value is actually empty or if the environment variable
+            # for this secret name wasn't populated (e.g., due to limitations).
+            if [ -z "$secret_value" ]; then
+              echo "Skipping: $secret_name (Value is empty OR env var not populated)"
+              continue # Skip to the next secret name in the loop
+            fi
+
+            echo "Writing $secret_name to .env file..."
+            # Append the secret name and its value to the .env file.
+            # Ensure proper quoting if values might contain special characters, though
+            # .env format usually doesn't require quotes unless values have spaces/newlines.
+            # For simplicity, we're not adding quotes here. Adjust if needed.
+            echo "${secret_name}=${secret_value}" >> .env
+
+          done
+
+          echo ".env file generation complete."
+          echo "Contents of .env:"
+        # Step 4: Install project dependencies
       - name: Install dependencies
         run: ${{ inputs.install_command }}
 
