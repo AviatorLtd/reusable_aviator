@@ -12,6 +12,10 @@ on:
         description: 'AWS region for the S3 bucket'
         required: true
         type: string
+      distribution_id:
+        description: "The Cloudfront distribution ID"
+        required: true
+        type: string
       branch_name:
         description: 'The branch name triggering the deployment'
         required: true
@@ -185,6 +189,8 @@ jobs:
 
       # Step 7: Deploy static files to S3 bucket
       - name: Deploy static site to S3 bucket
+        env: 
+          DISTRIBUTION_ID: ${{inputs.distribution_id}}
         run: |
           echo "Preparing deployment..."
           echo "Using build output directory: ${{ inputs.build_output_dir }}"
@@ -198,4 +204,6 @@ jobs:
             exit 1
           fi
           aws s3 sync ${{ inputs.build_output_dir }} "s3://${BUCKET_NAME}" --delete
+          echo "invalidation caching"
+          aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths "/*"
           echo "Deployment to s3://${BUCKET_NAME} completed."
