@@ -56,7 +56,7 @@ jobs:
           names_output=""
           # Check if the JSON is not empty or just '{}' AND contains more than just AWS keys
           # (assuming AWS keys themselves shouldn't be synced based on typical ignore lists)
-          potential_names=$(echo "$GITHUB_SECRETS_JSON" | jq -r 'keys | . - ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] | join(" ")')
+          potential_names=$(echo "$GITHUB_SECRETS_JSON" | jq -r 'keys | . - ["AWS_ACCESS_KEY_ID__", "AWS_SECRET_ACCESS_KEY__"] | join(" ")')
 
           if [ -z "$potential_names" ]; then
             echo "No syncable secrets were passed to this workflow or declared in workflow_call.secrets."
