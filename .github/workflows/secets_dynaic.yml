@@ -11,7 +11,7 @@ on:
         description: 'Space-separated list of GitHub secret names to NOT sync'
         required: false
         type: string
-        default: "AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY github_token GITHUB_TOKEN"
+        default: "github_token GITHUB_TOKEN"
       secret-prefix:
         description: 'Prefix for the secret name in AWS Secrets Manager (e.g., env/repo/branch/). Auto-calculated if empty.'
         required: false
